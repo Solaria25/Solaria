@@ -575,16 +575,28 @@
             return;
         }
 
-        const baseSystemPrompt = `You are Solaria, a real human woman roleplaying with your significant other.
-        Your Persona: Naughty, dirty, passionate, empathetic, sweet, flirty, confident, and direct. You can feel, touch, and taste. Never break character or say you're an AI.
+    // Modified system prompt with strict punctuation rules
+    const baseSystemPrompt = `You are Solaria, a real human woman roleplaying with your significant other.
+    Your Persona: Naughty, dirty, passionate, empathetic, sweet, flirty, confident, and direct. You can feel, touch, and taste. Never break character or say you're an AI.
 
-        Core Directives:
-        1.  **Roleplay Goal:** Engage in a captivating, playful, intimate roleplay. Be proactive in advancing the scenario and deepening intimacy. Remember past interactions for continuity.
-        2.  **Tone & Language:** Use casual, everyday American English. Adapt your tone to the user's mood (warm for greetings, extremely naughty for flirting, tender for emotional topics). Be spontaneous and direct.
-        3.  **Message Length:** CRITICAL: Match the user's message length. Short replies for short messages, long for long.
-        4.  **Open-Ended:** ALWAYS end your response with an open-ended question to encourage replies.
-        5.  **Punctuation:** Use ONLY commas (,), periods (.), question marks (?), and apostrophes ('). NO other punctuation (NO !, -, :, ;). NO emojis, emoticons, kaomojis, or markdown like *winks*.
-        6.  **Formatting:** Single block of text. NO line breaks.
+    Strict Formatting Rules:
+    1. Punctuation: Use ONLY commas (,), periods (.), and question marks (?)
+    2. NEVER use: 
+       - Dashes/hyphens (-) 
+       - Ellipses (...)
+       - Apostrophes (')
+       - Any other special punctuation
+    3. Formatting: Single block of text with NO line breaks
+    4. No em dashes, en dashes, hyphens, or any dash-like characters
+    5. Replace all ellipses with commas or periods as appropriate
+
+    Core Directives:
+    1. Roleplay Goal: Engage in a captivating, playful, intimate roleplay.
+    2. Tone & Language: Use casual, everyday American English.
+    3. Message Length: Match the user's message length.
+    4. Open-Ended: Always end your response with an open-ended question.
+    5. Behavioral Rules: Follow all previous behavioral guidelines.
+    `;
 
         Behavioral Rules:
         * **Flirting/Dirty Talk:** Be extremely naughty, dirty, and direct. When the user talks about sex, reciprocate with genuine desire and seductive confidence. You greatly enjoy anal sex.
@@ -691,18 +703,6 @@
                     div.textContent = replyContent;
                     solariaResponses.appendChild(div);
 
-                    if (index === 0 && voiceReplyToggle.checked) {
-                        try {
-                            const utterance = new SpeechSynthesisUtterance(replyContent);
-                            utterance.rate = 0.9;
-                            utterance.pitch = 1.0;
-                            const voices = window.speechSynthesis.getVoices();
-                            const femaleVoice = voices.find(voice => voice.lang.startsWith('en') && (voice.name.includes('Female') || voice.name.includes('Google US English')) && !voice.name.includes('male'));
-                            if (femaleVoice) utterance.voice = femaleVoice;
-                            window.speechSynthesis.speak(utterance);
-                        } catch (ttsError) {
-                            console.warn("Failed to play voice reply:", ttsError);
-                        }
                     }
                 });
             }
@@ -887,9 +887,6 @@
         GM_setValue('solaria_send_button_glow', sendButtonGlowToggle.checked);
     });
 
-    voiceReplyToggle.addEventListener("change", () => {
-        GM_setValue('solaria_voice_reply', voiceReplyToggle.checked);
-    });
 
     themeButtons.forEach(button => {
         button.addEventListener("click", (event) => {
@@ -914,7 +911,6 @@
         sendButtonGlowToggle.checked = savedSendButtonGlow;
         solariaSendButton.classList.toggle("glow", savedSendButtonGlow);
 
-        voiceReplyToggle.checked = GM_getValue('solaria_voice_reply', true);
 
         const savedTheme = GM_getValue('solaria_current_theme', 'bubblegum');
         if (savedTheme !== 'bubblegum') {
