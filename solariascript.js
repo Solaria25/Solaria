@@ -12,7 +12,7 @@
 // @grant         GM_xmlhttpRequest
 // @grant         GM_setClipboard
 // @connect       https://openrouter.ai
-// @connect       gist.githubusercontent.com
+// @connect       https://raw.githubusercontent.com/Solaria25/Solaria/refs/heads/main/authorized_cone_ids.json
 // @connect       https://raw.githubusercontent.com/Solaria25/Solaria
 // ==/UserScript==
 
