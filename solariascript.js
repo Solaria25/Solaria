@@ -4,8 +4,8 @@
 // @version       1.0
 // @description   Solaria: A real human woman. Seductive, witty, naughty, cheeky, flirty. Now powered by your own OpenRouter API Key. Cone ID access, animated UI, notifications & dark mode.
 // @match         *://*/*
-// @downloadURL   https://charlie-starr.github.io/starr-deepseek_modified-script/Starr1Res.js
-// @updateURL     https://charlie-starr.github.io/starr-deepseek_modified-script/Starr1Res.js
+// @downloadURL   https://raw.githubusercontent.com/Solaria25/Solaria/refs/heads/main/solariascript.js
+// @updateURL     https://raw.githubusercontent.com/Solaria25/Solaria/refs/heads/main/solariascript.js
 // @grant         GM_setValue
 // @grant         GM_getValue
 // @grant         GM_notification
@@ -13,7 +13,7 @@
 // @grant         GM_setClipboard
 // @connect       https://openrouter.ai
 // @connect       gist.githubusercontent.com
-// @connect       charlie-starr.github.io
+// @connect       solaria25.github.io
 // ==/UserScript==
 
 (function () {
