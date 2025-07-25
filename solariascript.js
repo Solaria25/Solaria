@@ -2,7 +2,7 @@
 // @name          Solaria
 // @namespace     http://tampermonkey.net/
 // @version       1.0
-// @description   Solaria: A real human woman. Seductive, witty, naughty, cheeky, flirty. Now powered by your own OpenRouter API Key. Cone ID access, animated UI, notifications & dark mode.
+// @description   Solaria: A real human woman. Seductive, witty, naughty, cheeky, flirty. Powered by your OpenRouter API Key.
 // @match         *://*/*
 // @downloadURL   https://raw.githubusercontent.com/Solaria25/Solaria/refs/heads/main/solariascript.js
 // @updateURL     https://raw.githubusercontent.com/Solaria25/Solaria/refs/heads/main/solariascript.js
@@ -12,45 +12,18 @@
 // @grant         GM_xmlhttpRequest
 // @grant         GM_setClipboard
 // @connect       https://openrouter.ai
-// @connect       https://raw.githubusercontent.com/Solaria25/Solaria/refs/heads/main/authorized_cone_ids.json
-// @connect       https://raw.githubusercontent.com/Solaria25/Solaria
 // ==/UserScript==
 
 (function () {
     'use strict';
 
     // --- CONFIGURATION ---
-    // IMPORTANT: Make sure these selectors match the actual elements on your dating site.
-
-    // CSS Selector for the customer's latest message (based on your provided HTML)
     const CUSTOMER_MESSAGE_SELECTOR = 'p[style="word-wrap: break-word"]';
-
-    // CSS Selector for the dating site's input text area where you type replies
-    const REPLY_INPUT_SELECTOR = '#reply-textarea'; // Based on your previous context
-
-    // NEW: CSS Selector for the CONE ID displayed on the UI
-    const CONE_ID_UI_SELECTOR = '#app > main > div.flex-shrink-1 > nav > div:nth-child(3) > div > div.col-auto.navbar-text.fw-bold';
-
-    // Your GitHub Gist URL for authorized CONE IDs
-    // Solaria will check this list to verify access.
-    // UPDATED GIST URL as per request
-    const AUTHORIZED_CONE_IDS_GIST_URL = 'https://raw.githubusercontent.com/Solaria25/Solaria/refs/heads/script/authorized_cone_ids.json';
-    const GIST_CACHE_EXPIRY = 0; // 0 for instant updates. Was 24 * 60 * 60 * 1000; // 24 hours in milliseconds
-
-    // CSS Selectors for the 2-3 previous messages (for context, if needed by prompt)
-    const ALL_CUSTOMER_MESSAGES_SELECTOR = 'p[style="word-wrap: break-word"]'; // This now covers all messages.
-
-    // Custom Model API Configuration
+    const REPLY_INPUT_SELECTOR = '#reply-textarea';
+    const ALL_CUSTOMER_MESSAGES_SELECTOR = 'p[style="word-wrap: break-word"]';
     const API_URL = "https://openrouter.ai/api/v1/chat/completions";
     const MODEL_NAME = "deepseek/deepseek-chat-v3-0324:free";
-
-    // --- END CONFIGURATION ---
-
-    let authorizedConeIds = []; // Stores the fetched list of authorized IDs
-    let isAuthorized = false; // Flag to track if the current user is authorized (after initial CONE ID entry)
-    let storedUserConeId = null; // Stores the CONE ID manually entered by the user
-    let waitingForUiDetectionAndMessage = false; // Flag for second stage of authorization
-    let accessDeniedPermanent = false; // Flag for permanent access denial after UI check failure
+    const MAX_CONVERSATION_HISTORY = 20;
 
     const style = document.createElement("style");
     style.textContent = `
@@ -79,8 +52,8 @@
             transform: translate(-50%, -50%);
             width: 840px;
             max-height: 90vh;
-            background: var(--solaria-popup-background); /* Themed */
-            border: 2px solid var(--solaria-border-color); /* Themed */
+            background: var(--solaria-popup-background);
+            border: 2px solid var(--solaria-border-color);
             border-radius: 20px;
             padding: 20px;
             box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
@@ -90,24 +63,24 @@
             font-family: Arial, sans-serif;
             overflow-y: auto;
             justify-content: space-between;
-            color: var(--solaria-text-color); /* Themed */
+            color: var(--solaria-text-color);
             transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease;
         }
 
         .solaria-reply.selected-reply {
-            border-color: var(--solaria-send-button-bg); /* Use theme color for highlight */
+            border-color: var(--solaria-send-button-bg);
             box-shadow: 0 0 5px var(--solaria-send-button-bg);
         }
 
         #solaria-popup h3 {
             font-family: 'Georgia', serif;
             font-size: 26px;
-            color: var(--solaria-header-color); /* Themed */
+            color: var(--solaria-header-color);
             text-align: center;
             margin-bottom: 20px;
             padding-bottom: 10px;
-            border-bottom: 2px solid var(--solaria-header-border); /* Themed */
-            background: var(--solaria-header-background); /* Themed */
+            border-bottom: 2px solid var(--solaria-header-border);
+            background: var(--solaria-header-background);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             font-weight: bold;
@@ -115,24 +88,22 @@
             transition: color 0.3s ease, border-color 0.3s ease;
         }
 
-        #solaria-input, #cone-id-input {
+        #solaria-input {
             width: 100%;
             padding: 10px;
             margin-top: 10px;
             border-radius: 8px;
-            border: 1px solid var(--solaria-input-border); /* Themed */
+            border: 1px solid var(--solaria-input-border);
             resize: vertical;
             min-height: 80px;
             font-size: 14px;
             margin-bottom: 15px;
             box-sizing: border-box;
             order: 1;
-            background-color: var(--solaria-input-background); /* Themed */
-            color: var(--solaria-input-text); /* Themed */
+            background-color: var(--solaria-input-background);
+            color: var(--solaria-input-text);
             transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease;
         }
-        #cone-id-input { min-height: unset; }
-
 
         .solaria-replies {
             margin-top: 0;
@@ -147,11 +118,11 @@
         }
 
         .solaria-reply {
-            background: var(--solaria-reply-background); /* Themed */
+            background: var(--solaria-reply-background);
             padding: 12px;
             border-radius: 12px;
-            border: 1px solid var(--solaria-reply-border); /* Themed */
-            color: var(--solaria-reply-text); /* Themed */
+            border: 1px solid var(--solaria-reply-border);
+            color: var(--solaria-reply-text);
             white-space: pre-wrap;
             position: relative;
             font-size: 14px;
@@ -163,7 +134,7 @@
             position: absolute;
             top: 8px;
             right: 8px;
-            background: var(--solaria-button-bg-secondary); /* Themed */
+            background: var(--solaria-button-bg-secondary);
             border: none;
             color: white;
             padding: 4px 8px;
@@ -185,7 +156,7 @@
             order: 3;
         }
 
-        #solaria-send, #solaria-close, #solaria-regenerate, #solaria-force-key, #submit-cone-id, #solaria-settings-button, .theme-button {
+        #solaria-send, #solaria-close, #solaria-regenerate, #solaria-force-key, #solaria-settings-button, .theme-button {
             padding: 8px 12px;
             border-radius: 8px;
             font-weight: bold;
@@ -202,7 +173,7 @@
         }
 
         #solaria-send {
-            background: var(--solaria-send-button-bg); /* Themed */
+            background: var(--solaria-send-button-bg);
             color: white;
             position: relative;
             overflow: hidden;
@@ -226,22 +197,17 @@
         }
 
         #solaria-close {
-            background: var(--solaria-close-button-bg); /* Themed */
-            color: var(--solaria-close-button-text); /* Themed */
+            background: var(--solaria-close-button-bg);
+            color: var(--solaria-close-button-text);
         }
 
         #solaria-regenerate {
-            background: var(--solaria-regenerate-button-bg); /* Themed */
+            background: var(--solaria-regenerate-button-bg);
             color: white;
         }
 
         #solaria-force-key {
-            background: var(--solaria-force-key-button-bg); /* Themed */
-            color: white;
-        }
-
-        #submit-cone-id {
-            background: var(--solaria-submit-cone-id-button-bg); /* Themed */
+            background: var(--solaria-force-key-button-bg);
             color: white;
         }
 
@@ -249,13 +215,13 @@
         .solaria-loading {
             text-align: center;
             margin-top: 15px;
-            font-size: 30px; /* Larger emoji */
-            color: var(--solaria-loading-color); /* Themed */
-            height: 40px; /* Reserve space */
-            display: flex; /* Use flexbox for centering */
-            justify-content: center; /* Center horizontally */
-            align-items: center; /* Center vertically */
-            gap: 5px; /* Space between emojis */
+            font-size: 30px;
+            color: var(--solaria-loading-color);
+            height: 40px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 5px;
             order: 4;
             transition: color 0.3s ease;
         }
@@ -285,16 +251,13 @@
             --solaria-reply-border: #ff99cc;
             --solaria-reply-text: #b10082;
             --solaria-send-button-bg: #cc66ff;
-            --solaria-send-button-glow-color: #ff3399; /* Pink glow */
+            --solaria-send-button-glow-color: #ff3399;
             --solaria-close-button-bg: #ffd6f5;
             --solaria-close-button-text: #b10082;
             --solaria-regenerate-button-bg: #66ccff;
             --solaria-force-key-button-bg: #ff5e5e;
-            --solaria-submit-cone-id-button-bg: #cc66ff;
             --solaria-loading-color: #ff66cc;
-            --solaria-auth-message-color: red;
-            --solaria-waiting-message-color: #d10082;
-            --solaria-settings-button-bg: #8844ee; /* Purple */
+            --solaria-settings-button-bg: #8844ee;
             --solaria-settings-button-text: white;
             --solaria-settings-panel-background: #f8f8f8;
             --solaria-settings-panel-border: #cccccc;
@@ -313,16 +276,13 @@
             --solaria-reply-background: #4a4a4a;
             --solaria-reply-border: #6a0572;
             --solaria-reply-text: #e0b0ff;
-            --solaria-send-button-bg: #7f00ff; /* Darker purple */
-            --solaria-send-button-glow-color: #e0b0ff; /* Lighter purple glow */
+            --solaria-send-button-bg: #7f00ff;
+            --solaria-send-button-glow-color: #e0b0ff;
             --solaria-close-button-bg: #5a1c8f;
             --solaria-close-button-text: #e0b0ff;
             --solaria-regenerate-button-bg: #007bff;
             --solaria-force-key-button-bg: #cc0000;
-            --solaria-submit-cone-id-button-bg: #7f00ff;
             --solaria-loading-color: #e0b0ff;
-            --solaria-auth-message-color: #ff6666;
-            --solaria-waiting-message-color: #e0b0ff;
             --solaria-settings-panel-background: #3a3a3a;
             --solaria-settings-panel-border: #555555;
         }
@@ -340,16 +300,13 @@
             --solaria-reply-background: #2e6099;
             --solaria-reply-border: #0f3460;
             --solaria-reply-text: #e0f2f7;
-            --solaria-send-button-bg: #007bff; /* Blue */
-            --solaria-send-button-glow-color: #6495ed; /* Cornflower blue glow */
+            --solaria-send-button-bg: #007bff;
+            --solaria-send-button-glow-color: #6495ed;
             --solaria-close-button-bg: #16213e;
             --solaria-close-button-text: #e0f2f7;
-            --solaria-regenerate-button-bg: #00bcd4; /* Cyan */
-            --solaria-force-key-button-bg: #dc3545; /* Red */
-            --solaria-submit-cone-id-button-bg: #007bff;
+            --solaria-regenerate-button-bg: #00bcd4;
+            --solaria-force-key-button-bg: #dc3545;
             --solaria-loading-color: #6495ed;
-            --solaria-auth-message-color: #ff6666;
-            --solaria-waiting-message-color: #6495ed;
             --solaria-settings-panel-background: #16213e;
             --solaria-settings-panel-border: #0f3460;
         }
@@ -357,53 +314,47 @@
         /* Halloween Theme */
         .theme-halloween {
             --solaria-popup-background: #1a1a1a;
-            --solaria-border-color: #8b0000; /* Dark Red */
-            --solaria-header-color: #ff4500; /* OrangeRed */
-            --solaria-header-border: #cc0000; /* Darker Red */
+            --solaria-border-color: #8b0000;
+            --solaria-header-color: #ff4500;
+            --solaria-header-border: #cc0000;
             --solaria-header-background: linear-gradient(45deg, #330000, #440000);
             --solaria-input-border: #cc0000;
             --solaria-input-background: #330000;
-            --solaria-input-text: #ff8c00; /* DarkOrange */
+            --solaria-input-text: #ff8c00;
             --solaria-reply-background: #440000;
             --solaria-reply-border: #8b0000;
             --solaria-reply-text: #ff4500;
-            --solaria-send-button-bg: #ff4500; /* OrangeRed */
-            --solaria-send-button-glow-color: #ffa500; /* Orange glow */
+            --solaria-send-button-bg: #ff4500;
+            --solaria-send-button-glow-color: #ffa500;
             --solaria-close-button-bg: #660000;
             --solaria-close-button-text: #ff8c00;
-            --solaria-regenerate-button-bg: #4b0082; /* Indigo */
+            --solaria-regenerate-button-bg: #4b0082;
             --solaria-force-key-button-bg: #8b0000;
-            --solaria-submit-cone-id-button-bg: #ff4500;
             --solaria-loading-color: #ffa500;
-            --solaria-auth-message-color: #ff6666;
-            --solaria-waiting-message-color: #ffa500;
             --solaria-settings-panel-background: #333333;
             --solaria-settings-panel-border: #444444;
         }
 
         /* Valentine Theme */
         .theme-valentine {
-            --solaria-popup-background: #ffe6f2; /* Light Pink */
-            --solaria-border-color: #e04482; /* Deep Rose */
-            --solaria-header-color: #a02040; /* Cranberry */
-            --solaria-header-border: #ff69b4; /* Hot Pink */
-            --solaria-header-background: linear-gradient(45deg, #ffc0cb, #ffb6c1); /* Pink to Light Pink */
+            --solaria-popup-background: #ffe6f2;
+            --solaria-border-color: #e04482;
+            --solaria-header-color: #a02040;
+            --solaria-header-border: #ff69b4;
+            --solaria-header-background: linear-gradient(45deg, #ffc0cb, #ffb6c1);
             --solaria-input-border: #ff69b4;
             --solaria-input-background: #ffffff;
             --solaria-input-text: #333333;
-            --solaria-reply-background: #fbc2eb; /* Rosy Pink */
+            --solaria-reply-background: #fbc2eb;
             --solaria-reply-border: #e04482;
             --solaria-reply-text: #a02040;
-            --solaria-send-button-bg: #ff1493; /* Deep Pink */
-            --solaria-send-button-glow-color: #ff69b4; /* Hot Pink glow */
-            --solaria-close-button-bg: #f7a2d6; /* Pastel Pink */
+            --solaria-send-button-bg: #ff1493;
+            --solaria-send-button-glow-color: #ff69b4;
+            --solaria-close-button-bg: #f7a2d6;
             --solaria-close-button-text: #a02040;
-            --solaria-regenerate-button-bg: #b364e7; /* Medium Purple */
-            --solaria-force-key-button-bg: #cc3333; /* Dark Red */
-            --solaria-submit-cone-id-button-bg: #ff1493;
+            --solaria-regenerate-button-bg: #b364e7;
+            --solaria-force-key-button-bg: #cc3333;
             --solaria-loading-color: #ff69b4;
-            --solaria-auth-message-color: #cc3333;
-            --solaria-waiting-message-color: #ff69b4;
             --solaria-settings-panel-background: #fff0f5;
             --solaria-settings-panel-border: #e04482;
         }
@@ -457,14 +408,7 @@
     popup.id = "solaria-popup";
     popup.innerHTML = `
         <h3>Talk to Solaria, baby💦...</h3>
-        <div id="auth-section">
-            <p>Please enter your CONE ID to access Solaria:</p>
-            <input type="text" id="cone-id-input" placeholder="Enter CONE ID" style="width: 100%; padding: 8px; margin-bottom: 10px; border-radius: 5px; border: 1px solid #ccc;">
-            <button id="submit-cone-id">Submit</button>
-            <p id="auth-message" style="color: var(--solaria-auth-message-color); margin-top: 10px;"></p>
-        </div>
-        <div id="waiting-message" style="display: none; text-align: center; color: var(--solaria-waiting-message-color); font-weight: bold; margin-top: 15px;"></div>
-        <div id="chat-section" style="display: none; flex-direction: column; height: 100%;">
+        <div id="chat-section" style="display: flex; flex-direction: column; height: 100%;">
             <textarea id="solaria-input" placeholder="Tell Solaria something juicy..."></textarea>
             <div class="solaria-replies" id="solaria-responses"></div>
             <div id="solaria-loading" class="solaria-loading" style="display: none;">
@@ -505,166 +449,27 @@
     const solariaResponses = document.getElementById("solaria-responses");
     const solariaInput = document.getElementById("solaria-input");
     const solariaLoading = document.getElementById("solaria-loading");
-
-    const authSection = document.getElementById("auth-section");
-    const chatSection = document.getElementById("chat-section");
-    const coneIdInput = document.getElementById("cone-id-input");
-    const submitConeIdButton = document.getElementById("submit-cone-id");
-    const authMessage = document.getElementById("auth-message");
-    const waitingMessage = document.getElementById("waiting-message");
-
-    // UI Elements for new features
     const solariaSettingsButton = document.getElementById("solaria-settings-button");
     const solariaSettingsPanel = document.getElementById("solaria-settings-panel");
     const darkModeToggle = document.getElementById("dark-mode-toggle");
     const sendButtonGlowToggle = document.getElementById("send-button-glow-toggle");
     const solariaSendButton = document.getElementById("solaria-send");
     const themeButtons = document.querySelectorAll(".theme-button");
-    const voiceReplyToggle = document.getElementById("voice-reply-toggle"); // New voice reply toggle
+    const voiceReplyToggle = document.getElementById("voice-reply-toggle");
 
     let conversationHistory = [];
     let lastProcessedMessage = '';
-    let selectedReplyIndex = -1; // Tracks the currently highlighted reply for keyboard navigation
+    let selectedReplyIndex = -1;
+    let pollingInterval = 3000;
 
-    // Central function to update the popup's UI based on current state
     function updatePopupUI() {
         popup.style.setProperty('display', 'flex', 'important');
-
-        if (accessDeniedPermanent) {
-            authSection.style.setProperty('display', 'none', 'important');
-            chatSection.style.setProperty('display', 'none', 'important');
-            waitingMessage.style.setProperty('display', 'block', 'important');
-            waitingMessage.style.color = 'red';
-            waitingMessage.textContent = "Access denied, babe. Your CONE ID on the site doesn't match the one you entered, or it's not authorized. This Solaria isn't for you... 💔";
-            return;
-        }
-
-        if (!isAuthorized) {
-            authSection.style.setProperty('display', 'block', 'important');
-            chatSection.style.setProperty('display', 'none', 'important');
-            waitingMessage.style.setProperty('display', 'none', 'important');
-            authMessage.textContent = "Pay money please...";
-            coneIdInput.value = storedUserConeId || "";
-            coneIdInput.focus();
-        } else {
-            authSection.style.setProperty('display', 'none', 'important');
-            if (waitingForUiDetectionAndMessage) {
-                chatSection.style.setProperty('display', 'none', 'important');
-                waitingMessage.style.setProperty('display', 'block', 'important');
-                waitingMessage.style.color = 'var(--solaria-waiting-message-color)';
-                waitingMessage.textContent = "Access granted! Now, click operator's service site 'start chatting' button and wait for a customer message to arrive.";
-            } else {
-                chatSection.style.setProperty('display', 'flex', 'important');
-                waitingMessage.style.setProperty('display', 'none', 'important');
-                solariaInput.focus();
-            }
-        }
-        // Ensure settings panel is hidden by default when opening the popup
+        solariaInput.focus();
         solariaSettingsPanel.style.display = 'none';
     }
 
-
-    // Function to fetch authorized CONE IDs from Gist
-    async function fetchAuthorizedConeIds() {
-        console.log("Solaria: Attempting to fetch authorized CONE IDs from Gist.");
-        const cachedGistData = GM_getValue('authorized_cone_ids_cache', null);
-        const cachedTimestamp = GM_getValue('authorized_cone_ids_timestamp', 0);
-
-        if (cachedGistData && (Date.now() - cachedTimestamp < GIST_CACHE_EXPIRY)) {
-            console.log("Solaria: Using cached CONE IDs.");
-            authorizedConeIds = cachedGistData;
-            return;
-        }
-
-        console.log("Solaria: Cached CONE IDs expired or not found, fetching fresh from Gist.");
-        try {
-            const response = await new Promise((resolve, reject) => {
-                GM_xmlhttpRequest({
-                    method: "GET",
-                    url: AUTHORIZED_CONE_IDS_GIST_URL,
-                    onload: function (res) {
-                        if (res.status === 200) {
-                            resolve(res.responseText);
-                        } else {
-                            reject(new Error(`Failed to fetch Gist: ${res.status} ${res.statusText}`));
-                        }
-                    },
-                    onerror: function (err) {
-                        reject(err);
-                    }
-                });
-            });
-
-            authorizedConeIds = JSON.parse(response);
-            GM_setValue('authorized_cone_ids_cache', authorizedConeIds);
-            GM_setValue('authorized_cone_ids_timestamp', Date.now());
-            console.log("Solaria: Successfully fetched and cached CONE IDs.");
-        } catch (error) {
-            console.error("Solaria: Error fetching authorized CONE IDs:", error);
-            authMessage.textContent = "Error fetching CONE IDs. Please check your internet connection or Gist URL.";
-            waitingMessage.textContent = "Error fetching CONE IDs. Please check your internet connection or Gist URL.";
-            GM_setValue('authorized_cone_ids_cache', null);
-            GM_setValue('authorized_cone_ids_timestamp', 0);
-        }
-    }
-
-    // NEW: Function to get CONE ID from the UI selector
-    function getLoggedInConeId() {
-        const coneIdElement = document.querySelector(CONE_ID_UI_SELECTOR);
-        if (coneIdElement) {
-            const coneIdText = coneIdElement.textContent.trim();
-            const match = coneIdText.match(/(\w+)$/);
-            if (match && match[1]) {
-                console.log("Solaria: Detected UI CONE ID:", match[1]);
-                return match[1];
-            }
-        }
-        console.log("Solaria: UI CONE ID element not found or could not extract ID.");
-        return null;
-    }
-
-    // Function to check user authorization state (does not show UI)
-    async function checkUserAuthorizationStatus() {
-        await fetchAuthorizedConeIds();
-
-        storedUserConeId = GM_getValue('user_cone_id', null);
-        const lastAuthTimestamp = GM_getValue('user_auth_last_checked_timestamp', 0);
-
-        const sevenDays = 7 * 24 * 60 * 60 * 1000;
-        if (storedUserConeId && (Date.now() - lastAuthTimestamp > sevenDays)) {
-            console.log("Solaria: Stored CONE ID authorization expired (7 days). Forcing re-entry.");
-            GM_setValue('user_cone_id', null);
-            GM_setValue('user_auth_last_checked_timestamp', 0);
-            isAuthorized = false;
-            storedUserConeId = null;
-            return;
-        }
-
-        if (storedUserConeId && authorizedConeIds.includes(storedUserConeId)) {
-            console.log("Solaria: User is authorized with stored CONE ID:", storedUserConeId);
-            isAuthorized = true;
-            GM_setValue('user_auth_last_checked_timestamp', Date.now());
-        } else {
-            console.log("Solaria: User is not authorized or CONE ID not found in list.");
-            isAuthorized = false;
-        }
-    }
-
-    // Call this once on script load to set the initial authorization status
-    checkUserAuthorizationStatus();
-
-    // NEW: Function to initialize popup state based on authorization
-    async function initializeSolariaPopup() {
-        await fetchAuthorizedConeIds();
-        await checkUserAuthorizationStatus();
-
-        if (isAuthorized && !waitingForUiDetectionAndMessage && !accessDeniedPermanent) {
-            console.log("Solaria: User authorized. Initiating UI check sequence.");
-            waitingForUiDetectionAndMessage = true;
-        }
-
+    function initializeSolariaPopup() {
         updatePopupUI();
-
         solariaInput.value = "";
         solariaResponses.innerHTML = "";
         conversationHistory = [];
@@ -672,75 +477,6 @@
     }
 
     button.addEventListener("click", initializeSolariaPopup);
-
-    submitConeIdButton.addEventListener("click", async () => handleManualConeIdSubmit());
-    coneIdInput.addEventListener("keydown", async (event) => {
-        if (event.key === "Enter") {
-            event.preventDefault();
-            await handleManualConeIdSubmit();
-        }
-    });
-
-    async function handleManualConeIdSubmit() {
-        const enteredConeId = coneIdInput.value.trim();
-        if (!enteredConeId) {
-            authMessage.textContent = "CONE ID cannot be empty.";
-            return;
-        }
-
-        await fetchAuthorizedConeIds();
-
-        if (authorizedConeIds.includes(enteredConeId)) {
-            GM_setValue('user_cone_id', enteredConeId);
-            GM_setValue('user_auth_last_checked_timestamp', Date.now());
-            storedUserConeId = enteredConeId;
-            isAuthorized = true;
-            authMessage.textContent = "";
-
-            waitingForUiDetectionAndMessage = true;
-            accessDeniedPermanent = false;
-
-            console.log("Solaria: CONE ID '" + enteredConeId + "' authorized. Waiting for UI confirmation and message.");
-
-            updatePopupUI();
-
-            solariaInput.value = "";
-            solariaResponses.innerHTML = "";
-            conversationHistory = [];
-
-        } else {
-            GM_setValue('user_cone_id', null);
-            GM_setValue('user_auth_last_checked_timestamp', 0);
-            storedUserConeId = null;
-            isAuthorized = false;
-            authMessage.textContent = "Pay money please...";
-            console.warn("Solaria: Invalid CONE ID entered:", enteredConeId);
-
-            updatePopupUI();
-        }
-    }
-
-    document.getElementById("solaria-close").addEventListener("click", () => {
-        console.log("Solaria: 'Close' button clicked. Hiding popup.");
-        popup.style.setProperty('display', 'none', 'important');
-
-        waitingForUiDetectionAndMessage = false;
-        authMessage.textContent = "";
-        waitingMessage.textContent = "";
-
-        solariaResponses.innerHTML = "";
-        solariaInput.value = "";
-        conversationHistory = [];
-    });
-
-    document.getElementById("solaria-force-key").addEventListener("click", () => {
-        console.log("Solaria: 'Force New API Key' button clicked. Clearing stored API key.");
-        GM_setValue("solaria_openrouter_api_key", null);
-        alert("Solaria's OpenRouter.ai API key has been cleared. The next time you try to use Solaria, you'll be prompted for a new key.");
-        solariaResponses.innerHTML = '<div class="solaria-reply">API key cleared. Try sending a message or regenerating to get a new prompt.</div>';
-        solariaInput.value = "";
-        solariaInput.focus();
-    });
 
     function pasteIntoSiteChat(text) {
         const cleanedText = text.replace(/\s*Copy\s*$/, '');
@@ -750,11 +486,10 @@
             siteChatInput.value = cleanedText;
             siteChatInput.dispatchEvent(new Event('input', { bubbles: true }));
             siteChatInput.dispatchEvent(new Event('change', { bubbles: true }));
-            console.log("Solaria: Pasted message into site chat input.");
         } else {
-            console.warn("Solaria: Could not find the dating site's chat input box (" + REPLY_INPUT_SELECTOR + "). Please paste manually.");
+            console.warn("Could not find the chat input box. Please paste manually.");
             GM_notification({
-                text: "Warning: Could not auto-paste. Please paste manually. Check " + REPLY_INPUT_SELECTOR + " in script config.",
+                text: "Warning: Could not auto-paste. Please paste manually.",
                 timeout: 5000,
                 title: "Solaria Warning"
             });
@@ -765,13 +500,10 @@
         if (event.target.classList.contains('solaria-reply')) {
             const selectedReply = event.target.textContent;
             pasteIntoSiteChat(selectedReply);
-
             conversationHistory.push({ role: "assistant", content: selectedReply });
-
             solariaInput.value = "";
             solariaResponses.innerHTML = "";
             popup.style.setProperty('display', 'none', 'important');
-            console.log("Solaria: Reply selected and popup hidden.");
         }
     }
 
@@ -785,22 +517,14 @@
     ];
 
     async function fetchResponses(input) {
-        if (accessDeniedPermanent || waitingForUiDetectionAndMessage) {
-            console.warn("Solaria: Cannot fetch responses. Access permanently denied or still waiting for UI detection.");
-            return;
-        }
-
         let apiKey = GM_getValue("solaria_openrouter_api_key", null);
         if (!apiKey) {
-            console.log("Solaria: API key not found in storage. Prompting user for API key.");
             const entered = prompt("🔑 Please enter your OpenRouter.ai API key:");
             if (entered) {
                 GM_setValue("solaria_openrouter_api_key", entered.trim());
                 apiKey = entered.trim();
-                console.log("Solaria: New OpenRouter.ai API key entered and saved.");
             } else {
                 alert("Solaria needs an API key to work. Please provide one.");
-                console.warn("Solaria: User cancelled API key prompt or entered empty value.");
                 return;
             }
         }
@@ -809,7 +533,7 @@
         const customer = getCustomerInfo();
         const timeOfDay = getTimeOfDay();
 
-        // Handle keyword-based inputs before making an API call.
+        // Handle keyword-based inputs before making an API call
         if (input.toLowerCase().includes("other women wasting time") || input.toLowerCase().includes("not showing up")) {
             const div = document.createElement("div");
             div.className = "solaria-reply";
@@ -818,6 +542,7 @@
             solariaResponses.appendChild(div);
             return;
         }
+
         if (input.toLowerCase().includes("i guess i'm not the right guy for you, bye")) {
             const div = document.createElement("div");
             div.className = "solaria-reply";
@@ -826,6 +551,7 @@
             solariaResponses.appendChild(div);
             return;
         }
+
         const contactRequestPhrases = ["call my number", "text my number", "your number", "your address", "contact info"];
         if (contactRequestPhrases.some(phrase => input.toLowerCase().includes(phrase))) {
             const refuseResponses = [
@@ -839,6 +565,7 @@
             solariaResponses.appendChild(div);
             return;
         }
+
         if (input.toLowerCase().includes("your name") || input.toLowerCase().includes("who are you")) {
             const div = document.createElement("div");
             div.className = "solaria-reply";
@@ -889,21 +616,20 @@
 
         const messagesToSend = [
             { role: "system", content: dynamicSystemPrompt },
-            ...conversationHistory.slice(-10)
+            ...conversationHistory.slice(-MAX_CONVERSATION_HISTORY)
         ];
 
         solariaLoading.style.setProperty('display', 'flex', 'important');
         solariaResponses.innerHTML = "";
 
-        console.log("Solaria: Sending request to OpenRouter with model:", MODEL_NAME);
         try {
             const res = await fetch(API_URL, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
                     "Authorization": `Bearer ${apiKey}`,
-                    "HTTP-Referer": "https://myoperatorservice.com", // Site identifier for OpenRouter
-                    "X-Title": "Solaria AI", // App identifier for OpenRouter
+                    "HTTP-Referer": "https://myoperatorservice.com",
+                    "X-Title": "Solaria AI",
                 },
                 body: JSON.stringify({
                     model: MODEL_NAME,
@@ -911,21 +637,29 @@
                     temperature: 0.95,
                     max_tokens: 1024,
                     top_p: 0.95,
-                    n: 1 // Fetch one response at a time for this script version
+                    n: 1
                 })
             });
 
             if (!res.ok) {
-                const err = await res.text();
-                console.error("Solaria: OpenRouter API Response Error (Status: " + res.status + "):", err);
-                console.log("Solaria: Received non-OK API response. Clearing stored key to force re-prompt on next attempt.");
-                GM_setValue("solaria_openrouter_api_key", null);
-                throw new Error(`OpenRouter API Error: ${err}`);
+                let errorMsg = `API Error: ${res.status}`;
+                try {
+                    const errorData = await res.json();
+                    if (errorData.error?.message) {
+                        errorMsg += ` - ${errorData.error.message}`;
+                    }
+                } catch (e) {}
+                
+                if (res.status === 401 || res.status === 403) {
+                    GM_setValue("solaria_openrouter_api_key", null);
+                    errorMsg += "\n\nYour API key may be invalid. Please enter a new one.";
+                }
+                
+                throw new Error(errorMsg);
             }
 
             const data = await res.json();
             const choices = data.choices || [];
-            console.log("Solaria: Successfully received response from OpenRouter.", data);
 
             solariaResponses.innerHTML = "";
             if (choices.length === 0) {
@@ -967,31 +701,28 @@
                             if (femaleVoice) utterance.voice = femaleVoice;
                             window.speechSynthesis.speak(utterance);
                         } catch (ttsError) {
-                            console.warn("Solaria: Failed to play voice reply:", ttsError);
+                            console.warn("Failed to play voice reply:", ttsError);
                         }
                     }
                 });
             }
         } catch (error) {
-            alert("Solaria: An API error occurred! " + error.message + "\n\nPlease ensure your OpenRouter API key is correct. If the problem persists, use the 'Force New API Key' button.");
-            console.error("Solaria: API call error caught:", error);
-            const div = document.createElement("div");
-            div.className = "solaria-reply";
-            div.textContent = "Solaria ran into an error. Check console for details. Try again or use 'Force New API Key'.";
-            solariaResponses.appendChild(div);
+            console.error("API Error:", error);
+            const errorDiv = document.createElement("div");
+            errorDiv.className = "solaria-reply";
+            errorDiv.style.color = "red";
+            errorDiv.textContent = `Error: ${error.message}`;
+            solariaResponses.innerHTML = "";
+            solariaResponses.appendChild(errorDiv);
         } finally {
-            solariaLoading.style.setProperty('display', 'none', 'important');
+            solariaLoading.style.display = "none";
         }
     }
 
     document.getElementById("solaria-send").addEventListener("click", () => {
-        if (accessDeniedPermanent || waitingForUiDetectionAndMessage) {
-            console.warn("Solaria: Send button blocked. Access denied or awaiting UI check.");
-            return;
-        }
         const input = solariaInput.value.trim();
         if (!input) return;
-        console.log("Solaria: 'Send' button clicked. Input:", input);
+        
         const currentMessages = getAllCustomerMessages();
         if (currentMessages.length > 0 && currentMessages[currentMessages.length - 1].content === input) {
             conversationHistory = currentMessages;
@@ -1003,13 +734,9 @@
     });
 
     document.getElementById("solaria-regenerate").addEventListener("click", () => {
-        if (accessDeniedPermanent || waitingForUiDetectionAndMessage) {
-            console.warn("Solaria: Regenerate button blocked. Access denied or awaiting UI check.");
-            return;
-        }
         const input = solariaInput.value.trim();
         if (!input) return;
-        console.log("Solaria: 'Regenerate' button clicked. Input:", input);
+        
         if (conversationHistory.length > 0 && conversationHistory[conversationHistory.length - 1].role === 'user') {
             conversationHistory.pop();
         }
@@ -1023,6 +750,21 @@
         }
 
         fetchResponses(input);
+    });
+
+    document.getElementById("solaria-force-key").addEventListener("click", () => {
+        GM_setValue("solaria_openrouter_api_key", null);
+        alert("Solaria's OpenRouter.ai API key has been cleared. The next time you try to use Solaria, you'll be prompted for a new key.");
+        solariaResponses.innerHTML = '<div class="solaria-reply">API key cleared. Try sending a message or regenerating to get a new prompt.</div>';
+        solariaInput.value = "";
+        solariaInput.focus();
+    });
+
+    document.getElementById("solaria-close").addEventListener("click", () => {
+        popup.style.setProperty('display', 'none', 'important');
+        solariaResponses.innerHTML = "";
+        solariaInput.value = "";
+        conversationHistory = [];
     });
 
     function getPersonaInfo() {
@@ -1080,42 +822,16 @@
     function getTimeOfDay() {
         const TIME_ELEMENT_SELECTOR = "#memberTime";
         const timeElement = document.querySelector(TIME_ELEMENT_SELECTOR);
-        if (!timeElement) {
-            console.log("Solaria: Time element (#memberTime) not found.");
-            return "the current time";
-        }
+        if (!timeElement) return "the current time";
+        
         const timeString = timeElement.textContent.trim();
         const hour = parseInt(timeString.split(':')[0], 10);
-        if (isNaN(hour)) {
-            console.log("Solaria: Could not parse the hour from the time string:", timeString);
-            return "the current time";
-        }
-        if (hour >= 5 && hour < 12) { return "morning"; }
-        else if (hour >= 12 && hour < 17) { return "afternoon"; }
-        else if (hour >= 17 && hour < 21) { return "evening"; }
-        else { return "night"; }
-    }
-
-    async function performFinalAuthorizationCheck() {
-        if (!waitingForUiDetectionAndMessage) { return; }
-        const uiConeId = getLoggedInConeId();
-        console.log("Solaria: Performing final authorization check. UI Cone ID:", uiConeId, "Stored Cone ID:", storedUserConeId);
-        if (uiConeId && storedUserConeId && uiConeId === storedUserConeId && authorizedConeIds.includes(uiConeId)) {
-            console.log("Solaria: Final authorization successful!");
-            waitingForUiDetectionAndMessage = false;
-            accessDeniedPermanent = false;
-            updatePopupUI();
-            GM_notification({ text: "Solaria access fully confirmed! Start chatting, baby.", timeout: 3000, title: "Solaria Activated ✨" });
-        } else {
-            console.warn("Solaria: Final authorization failed. UI CONE ID mismatch or not found in authorized list.");
-            accessDeniedPermanent = true;
-            waitingForUiDetectionAndMessage = false;
-            updatePopupUI();
-            GM_setValue('user_cone_id', null);
-            GM_setValue('user_auth_last_checked_timestamp', 0);
-            storedUserConeId = null;
-            isAuthorized = false;
-        }
+        if (isNaN(hour)) return "the current time";
+        
+        if (hour >= 5 && hour < 12) return "morning";
+        else if (hour >= 12 && hour < 17) return "afternoon";
+        else if (hour >= 17 && hour < 21) return "evening";
+        else return "night";
     }
 
     function getAllCustomerMessages() {
@@ -1134,54 +850,26 @@
     }
 
     async function pollForNewMessages() {
-        if (!isAuthorized) { return; }
-        if (waitingForUiDetectionAndMessage) {
-            await performFinalAuthorizationCheck();
-            if (accessDeniedPermanent || waitingForUiDetectionAndMessage) { return; }
-        }
-        if (accessDeniedPermanent) { return; }
-
         const allCustomerMessages = getAllCustomerMessages();
         if (allCustomerMessages.length > 0) {
             const currentLatestMessageText = allCustomerMessages[allCustomerMessages.length - 1].content;
             if (currentLatestMessageText !== lastProcessedMessage) {
-                const latestCustomerMessage = currentLatestMessageText;
                 lastProcessedMessage = currentLatestMessageText;
-                console.log("Solaria: New customer message detected:", latestCustomerMessage);
                 conversationHistory = allCustomerMessages;
-
-                // --- Personal Info Detection ---
-                const personalInfoKeywords = [
-                    'my name is', 'i am from', 'my number is', 'my phone is', 'i live in', 'my address is',
-                    'facebook', 'whatsapp', 'instagram', 'snapchat', 'email', 'gmail', 'zangi', 'discord'
-                ];
-                const containsPI = personalInfoKeywords.some(keyword => latestCustomerMessage.toLowerCase().includes(keyword));
-
-                if (containsPI) {
-                    GM_notification({
-                        text: "Heads up, baby! The customer's last message might contain personal info. Be careful.",
-                        timeout: 6000,
-                        title: "Solaria: Info Detected"
-                    });
-                     console.log("Solaria: Detected potential personal info in message:", latestCustomerMessage);
-                }
-                // --- End Personal Info Detection ---
-
-                console.log("Solaria: New message detected, showing Solaria popup for reply generation.");
                 popup.style.setProperty('display', 'flex', 'important');
                 updatePopupUI();
-                solariaInput.value = latestCustomerMessage;
+                solariaInput.value = currentLatestMessageText;
                 solariaInput.focus();
                 try {
-                    await fetchResponses(latestCustomerMessage);
+                    await fetchResponses(currentLatestMessageText);
                 } catch (error) {
-                    console.error("Solaria: Error in automatic message processing during poll:", error);
+                    console.error("Error in message processing:", error);
                 }
             }
         }
     }
 
-    setInterval(pollForNewMessages, 3000);
+    setInterval(pollForNewMessages, pollingInterval);
 
     // --- UI Settings Logic ---
     solariaSettingsButton.addEventListener("click", () => {
@@ -1325,4 +1013,3 @@ function displayCustomerImages() {
     });
 }
 setInterval(displayCustomerImages, 2000);
-// === END IMAGE HANDLING FEATURE ===
